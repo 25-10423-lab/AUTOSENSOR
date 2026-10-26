@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>베이즈 정리와 자율 주행차 - Cyber HUD</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            cyber: {
+              bg: '#0A0F1D',
+              card: 'rgba(20, 30, 55, 0.75)',
+              neonGreen: '#00FF9D',
+              neonCyan: '#06B6D4',
+              accentBlue: '#3B82F6',
+              textPrimary: '#F8FAFC',
+              textSecondary: '#94A3B8',
+              border: 'rgba(0, 255, 157, 0.25)'
+            }
+          },
+          fontFamily: {
+            orbitron: ['Orbitron', 'sans-serif'],
+            noto: ['Noto Sans KR', 'sans-serif']
+          },
+          boxShadow: {
+            'cyber-glow': '0 0 20px rgba(0, 255, 157, 0.2)',
+            'cyan-glow': '0 0 20px rgba(6, 182, 212, 0.25)',
+            'neon-card': '0 8px 32px 0 rgba(0, 0, 0, 0.37)'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts (Orbitron + Noto Sans KR) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=Orbitron:wght@400;600;800;900&display=swap" rel="stylesheet">
+
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <style>
+    body {
+      font-family: 'Noto Sans KR', sans-serif;
+      background-color: #0A0F1D;
+      color: #F8FAFC;
+      overflow-x: hidden;
+    }
+
+    /* Cyber Background Grid Overlay */
+    .cyber-grid {
+      background-size: 40px 40px;
+      background-image: 
+        linear-gradient(to right, rgba(6, 182, 212, 0.05) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(6, 182, 212, 0.05) 1px, transparent 1px);
+    }
+
+    /* Scanline effect */
+    .scanlines {
+      background: linear-gradient(
+        to bottom,
+        rgba(255,255,255,0),
+        rgba(255,255,255,0) 50%,
+        rgba(0, 0, 0, 0.2) 50%,
+        rgba(0, 0, 0, 0.2)
+      );
+      background-size: 100% 4px;
+    }
+
+    /* Custom Glassmorphism Card Style */
+    .hud-card {
+      background: rgba(20, 30, 55, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(0, 255, 157, 0.2);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .hud-card:hover {
+      border-color: rgba(0, 255, 157, 0.6);
+      box-shadow: 0 0 25px rgba(0, 255, 157, 0.25);
+    }
+
+    /* Radar Pulse Animation */
+    @keyframes radarSweep {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .radar-sweeper {
+      animation: radarSweep 4s linear infinite;
+    }
+
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 0.4; transform: scale(0.98); }
+      50% { opacity: 0.9; transform: scale(1.02); }
+    }
+    .pulse-glow {
+      animation: pulseGlow 3s ease-in-out infinite;
+    }
+
+    /* Corner HUD bracket accents */
+    .hud-bracket {
+      position: relative;
+    }
+    .hud-bracket::before {
+      content: '';
+      position: absolute;
+      top: -2px;
+      left: -2px;
+      width: 10px;
+      height: 10px;
+      border-top: 2px solid #00FF9D;
+      border-left: 2px solid #00FF9D;
+    }
+    .hud-bracket::after {
+      content: '';
+      position: absolute;
+      bottom: -2px;
+      right: -2px;
+      width: 10px;
+      height: 10px;
+      border-bottom: 2px solid #00FF9D;
+      border-right: 2px solid #00FF9D;
+    }
+
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0A0F1D;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #06B6D4;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #00FF9D;
+    }
+  </style>
+</head>
+<body class="relative min-h-screen text-slate-100 cyber-grid overflow-x-hidden selection:bg-cyan-500 selection:text-black">
+
+  <!-- Ambient Glow Effects Background -->
+  <div class="fixed top-0 left-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none -z-10"></div>
+  <div class="fixed bottom-0 right-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none -z-10"></div>
+  <div class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-blue-600/5 rounded-full blur-3xl pointer-events-none -z-10"></div>
+
+  <!-- INTRO SCREEN OVERLAY (Cyber HUD Activation) -->
+  <div id="intro-screen" class="fixed inset-0 z-50 bg-[#0A0F1D] flex flex-col items-center justify-center p-4 transition-all duration-700 ease-out">
+    <div class="scanlines absolute inset-0 pointer-events-none opacity-40"></div>
+    
+    <!-- Cyber Radar Sweep Graphic -->
+    <div class="relative w-64 h-64 md:w-80 md:h-80 mb-8 flex items-center justify-center">
+      <!-- Outer Circles -->
+      <div class="absolute inset-0 rounded-full border border-emerald-500/30 animate-ping opacity-25"></div>
+      <div class="absolute inset-2 rounded-full border border-cyan-500/40"></div>
+      <div class="absolute inset-8 rounded-full border border-dashed border-emerald-500/50"></div>
+      <div class="absolute inset-16 rounded-full border border-cyan-400/20"></div>
+
+      <!-- Sweeping Line -->
+      <div class="radar-sweeper absolute inset-0 rounded-full bg-[conic-gradient(from_0deg,transparent_0_300deg,rgba(0,255,157,0.4)_360deg)]"></div>
+      
+      <!-- Central Glowing Car Icon -->
+      <div class="relative z-10 w-24 h-24 rounded-full bg-[#141E37] border-2 border-[#00FF9D] flex items-center justify-center shadow-[0_0_30px_rgba(0,255,157,0.5)] pulse-glow">
+        <i class="fa-solid fa-car-side text-4xl text-[#00FF9D]"></i>
+      </div>
+
+      <!-- HUD Telemetry Tags -->
+      <span class="absolute top-2 left-2 text-[10px] font-orbitron text-emerald-400 tracking-widest">[RADAR: ONLINE]</span>
+      <span class="absolute bottom-2 right-2 text-[10px] font-orbitron text-cyan-400 tracking-widest">[BAYESIAN_CORE: READY]</span>
+    </div>
+
+    <!-- Title & System Boot Button -->
+    <div class="text-center max-w-lg z-10">
+      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 text-xs font-orbitron mb-3">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        AUTONOMOUS VEHICLE MATHEMATICAL HUD
+      </div>
+      <h1 class="text-3xl md:text-5xl font-black font-orbitron text-white tracking-wider mb-2">
+        BAYESIAN <span class="text-transparent bg-clip-text bg-gradient-to-r from-[#00FF9D] to-[#06B6D4]">NAV-SYSTEM</span>
+      </h1>
+      <p class="text-slate-400 text-sm md:text-base mb-8">
+        베이즈 정리 기반 자율주행 차량 위치 추정 및 센서 보정 알고리즘 탐구
+      </p>
+
+      <button id="start-btn" onclick="enterDashboard()" class="group relative px-8 py-4 bg-gradient-to-r from-emerald-500 to-cyan-500 text-black font-orbitron font-bold text-lg rounded-xl shadow-[0_0_25px_rgba(0,255,157,0.4)] hover:shadow-[0_0_40px_rgba(6,182,212,0.6)] transition-all transform hover:-translate-y-0.5 active:translate-y-0">
+        <span class="flex items-center gap-3">
+          <i class="fa-solid fa-power-off"></i> HUD SYSTEM INITIALIZE
+        </span>
+      </button>
+    </div>
+  </div>
+
+  <!-- MAIN HUD WRAPPER -->
+  <div id="main-content" class="min-h-screen flex flex-col">
+
+    <!-- TOP NAVIGATION & STATUS BAR -->
+    <header class="sticky top-0 z-40 backdrop-blur-md bg-[#0A0F1D]/80 border-b border-slate-800/80 px-4 lg:px-12 py-3">
+      <div class="max-w-7xl mx-auto flex items-center justify-between">
+        
+        <!-- Left: Logo & HUD Telemetry -->
+        <div class="flex items-center gap-4">
+          <div class="w-10 h-10 rounded-lg bg-[#141E37] border border-[#00FF9D]/40 flex items-center justify-center text-[#00FF9D] shadow-cyber-glow">
+            <i class="fa-solid fa-microchip text-lg"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-orbitron text-emerald-400 tracking-wider">SYSTEM ACTIVE</span>
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+            </div>
+            <h1 class="font-orbitron font-extrabold text-sm md:text-lg text-slate-100 tracking-tight">
+              AUTONOMOUS HUD <span class="text-xs font-normal text-slate-400 font-noto">| 탐구 대시보드</span>
+            </h1>
+          </div>
+        </div>
+
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN BODY CONTAINER -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-8 space-y-12">
+
+      <!-- HERO SECTION: 2x2 NAV GRID & REALTIME TELEMETRY HUD CANVAS -->
+      <section class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+        
+        <!-- 2x2 NAVIGATION GRID (4 Core Sections) -->
+        <div class="lg:col-span-7 flex flex-col justify-between space-y-4">
+          <div class="hud-bracket hud-card p-6 rounded-2xl relative overflow-hidden">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
+              <div class="flex items-center gap-2">
+                <i class="fa-solid fa-compass text-emerald-400"></i>
+                <h2 class="font-orbitron font-bold text-lg text-slate-100">NAVIGATION INDEX</h2>
+              </div>
+              <span class="text-xs font-orbitron text-slate-400">SELECT SECTION [1-4]</span>
+            </div>
+
+            <!-- 2x2 Grid with 4 Main Action Buttons -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              
+              <!-- Button 1: 베이즈 정리란? -->
+              <a href="#sec-bayes" class="group relative hud-card p-5 rounded-xl border border-emerald-500/30 hover:border-emerald-400 bg-[#141E37]/60 hover:bg-[#141E37] transition-all flex flex-col justify-between h-32">
+                <div class="flex items-center justify-between">
+                  <span class="font-orbitron text-xs font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">01 // BASIC</span>
+                  <i class="fa-solid fa-[#00FF9D] fa-brain text-emerald-400 group-hover:scale-110 transition-transform"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-base text-white group-hover:text-emerald-300 transition-colors">베이즈 정리란?</h3>
+                  <p class="text-xs text-slate-400 mt-1">확률 갱신 공식 & 센서 가중치 원리</p>
+                </div>
+              </a>
+
+              <!-- Button 2: 후속 활동 동기 -->
+              <a href="#sec-motive" class="group relative hud-card p-5 rounded-xl border border-cyan-500/30 hover:border-cyan-400 bg-[#141E37]/60 hover:bg-[#141E37] transition-all flex flex-col justify-between h-32">
+                <div class="flex items-center justify-between">
+                  <span class="font-orbitron text-xs font-bold text-cyan-400 bg-cyan-500/10 px-2 py-1 rounded border border-cyan-500/20">02 // MOTIVE</span>
+                  <i class="fa-solid fa-lightbulb text-cyan-400 group-hover:scale-110 transition-transform"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-base text-white group-hover:text-cyan-300 transition-colors">후속 활동 동기</h3>
+                  <p class="text-xs text-slate-400 mt-1">자율주행 센서 보정 탐구 계기</p>
+                </div>
+              </a>
+
+              <!-- Button 3: 관련 도서 및 관련 직종 -->
+              <a href="#sec-books-career" class="group relative hud-card p-5 rounded-xl border border-blue-500/30 hover:border-blue-400 bg-[#141E37]/60 hover:bg-[#141E37] transition-all flex flex-col justify-between h-32">
+                <div class="flex items-center justify-between">
+                  <span class="font-orbitron text-xs font-bold text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">03 // RESOURCES</span>
+                  <i class="fa-solid fa-book-open-reader text-blue-400 group-hover:scale-110 transition-transform"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-base text-white group-hover:text-blue-300 transition-colors">관련 도서 및 관련 직종</h3>
+                  <p class="text-xs text-slate-400 mt-1">추천 도서 3편 & 커리어 로드맵</p>
+                </div>
+              </a>
+
+              <!-- Button 4: 시뮬레이션 -->
+              <a href="#sec-simulation" class="group relative hud-card p-5 rounded-xl border border-purple-500/30 hover:border-purple-400 bg-[#141E37]/60 hover:bg-[#141E37] transition-all flex flex-col justify-between h-32 shadow-[0_0_15px_rgba(168,85,247,0.15)]">
+                <div class="flex items-center justify-between">
+                  <span class="font-orbitron text-xs font-bold text-purple-400 bg-purple-500/10 px-2 py-1 rounded border border-purple-500/20">04 // SIMULATION</span>
+                  <i class="fa-solid fa-gamepad text-purple-400 group-hover:scale-110 transition-transform"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-base text-white group-hover:text-purple-300 transition-colors">시뮬레이션</h3>
+                  <p class="text-xs text-slate-400 mt-1">칼만 필터 오차율 시뮬레이션</p>
+                </div>
+              </a>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- TELEMETRY / CAR RADAR VISUALIZER CANVAS CARD -->
+        <div class="lg:col-span-5 hud-bracket hud-card p-6 rounded-2xl flex flex-col justify-between relative overflow-hidden">
+          <div class="flex items-center justify-between mb-3 border-b border-slate-800 pb-2">
+            <div class="flex items-center gap-2">
+              <i class="fa-solid fa-crosshairs text-cyan-400"></i>
+              <h2 class="font-orbitron font-bold text-sm text-slate-200">LiDAR RADAR TELEMETRY</h2>
+            </div>
+            <span class="text-[10px] font-orbitron px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">LIDAR: RUNNING</span>
+          </div>
+
+          <!-- Radar Canvas Visualizer -->
+          <div class="relative w-full h-48 md:h-56 bg-slate-950/80 rounded-xl border border-slate-800 flex items-center justify-center overflow-hidden">
+            <canvas id="hud-radar-canvas" class="w-full h-full block"></canvas>
+            
+            <!-- Overlay Info -->
+            <div class="absolute bottom-2 left-3 right-3 flex justify-between text-[11px] font-orbitron text-slate-400 bg-slate-900/80 px-3 py-1.5 rounded border border-slate-800">
+              <div>ESTIMATED POS: <span class="text-emerald-400">X: +14.2m | Y: +2.8m</span></div>
+              <div>CONFIDENCE: <span class="text-cyan-400">98.7%</span></div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- SECTION 1: 베이즈 정리란? -->
+      <section id="sec-bayes" class="hud-bracket hud-card p-6 md:p-8 rounded-2xl relative">
+        <!-- Header -->
+        <div class="flex items-center gap-3 mb-6 border-b border-slate-800 pb-4">
+          <div class="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xl">
+            <i class="fa-solid fa-square-root-variable"></i>
+          </div>
+          <div>
+            <span class="text-xs font-orbitron text-emerald-400 tracking-wider">SECTION 01</span>
+            <h2 class="text-2xl md:text-3xl font-extrabold font-noto text-white">베이즈 정리란?</h2>
+          </div>
+        </div>
+
+        <!-- 3 Core Concept Cards Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          
+          <!-- Card 1 -->
+          <div class="p-5 rounded-xl bg-[#141E37]/80 border border-slate-700/60 hover:border-emerald-500/40 transition-all flex flex-col justify-between">
+            <div>
+              <div class="flex items-center gap-2 text-emerald-400 font-orbitron text-xs font-bold mb-2">
+                <i class="fa-solid fa-atom"></i> CONCEPT 01
+              </div>
+              <h3 class="text-lg font-bold text-slate-100 mb-2">베이즈 정리란?</h3>
+              <p class="text-slate-300 text-sm leading-relaxed">
+                새로운 증거를 바탕으로 어떤 사건이 일어날 확률을 갱신하는 수학적 공식입니다.
+              </p>
+            </div>
+            <div class="mt-4 pt-3 border-t border-slate-800/80 text-xs font-orbitron text-emerald-400">
+              P(A|B) = [P(B|A) · P(A)] / P(B)
+            </div>
+          </div>
+
+          <!-- Card 2 -->
+          <div class="p-5 rounded-xl bg-[#141E37]/80 border border-slate-700/60 hover:border-cyan-500/40 transition-all flex flex-col justify-between">
+            <div>
+              <div class="flex items-center gap-2 text-cyan-400 font-orbitron text-xs font-bold mb-2">
+                <i class="fa-solid fa-clock-rotate-left"></i> CONCEPT 02
+              </div>
+              <h3 class="text-lg font-bold text-slate-100 mb-2">베이즈 필터란?</h3>
+              <p class="text-slate-300 text-sm leading-relaxed">
+                베이즈 정리를 시간 순서에 따라 반복 적용해 움직이는 물체의 상태를 추정하는 알고리즘을 말합니다.
+              </p>
+            </div>
+            <div class="mt-4 pt-3 border-t border-slate-800/80 text-xs font-orbitron text-cyan-400">
+              STATE ESTIMATION OVER TIME
+            </div>
+          </div>
+
+          <!-- Card 3 -->
+          <div class="p-5 rounded-xl bg-[#141E37]/80 border border-slate-700/60 hover:border-blue-500/40 transition-all flex flex-col justify-between">
+            <div>
+              <div class="flex items-center gap-2 text-blue-400 font-orbitron text-xs font-bold mb-2">
+                <i class="fa-solid fa-car-sensor"></i> CONCEPT 03
+              </div>
+              <h3 class="text-lg font-bold text-slate-100 mb-2">자율주행차와는 어떤 관계가 있을까?</h3>
+              <p class="text-slate-300 text-sm leading-relaxed">
+                자율주행차의 센서는 악천후나 노이즈 때문에 100% 신뢰할 수는 없습니다. 따라서 예측값과 센서의 측정값에 가중치를 부여해 진짜 위치를 찾아내는 것입니다.
+              </p>
+            </div>
+            <div class="mt-4 pt-3 border-t border-slate-800/80 text-xs font-orbitron text-blue-400">
+              SENSOR FUSION & WEIGHTING
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Interactive Mini Bayes Widget -->
+        <div class="p-6 rounded-xl bg-slate-950/70 border border-emerald-500/30">
+          <div class="flex items-center justify-between mb-4">
+            <h4 class="font-orbitron font-bold text-sm text-emerald-400 flex items-center gap-2">
+              <i class="fa-solid fa-calculator"></i> INTERACTIVE BAYES PROBABILITY UPDATER
+            </h4>
+            <span class="text-xs text-slate-400 font-orbitron">[REAL-TIME SIMULATOR]</span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+            <!-- Controls -->
+            <div class="space-y-4 text-xs">
+              <div>
+                <div class="flex justify-between text-slate-300 mb-1">
+                  <span>사전 확률 P(A) [기존 위치 예측 확률]:</span>
+                  <span id="prior-val" class="font-orbitron text-emerald-400 font-bold">50%</span>
+                </div>
+                <input id="prior-range" type="range" min="1" max="99" value="50" oninput="updateBayesWidget()" class="w-full accent-emerald-400 bg-slate-800 rounded h-2 cursor-pointer" />
+              </div>
+
+              <div>
+                <div class="flex justify-between text-slate-300 mb-1">
+                  <span>센서 신뢰도 P(B|A) [라이다/카메라 정확도]:</span>
+                  <span id="sensor-val" class="font-orbitron text-cyan-400 font-bold">80%</span>
+                </div>
+                <input id="sensor-range" type="range" min="1" max="99" value="80" oninput="updateBayesWidget()" class="w-full accent-cyan-400 bg-slate-800 rounded h-2 cursor-pointer" />
+              </div>
+            </div>
+
+            <!-- Output Display -->
+            <div class="p-4 rounded-lg bg-[#141E37] border border-slate-800 text-center flex flex-col justify-center items-center">
+              <span class="text-xs font-orbitron text-slate-400 mb-1">보정된 사후 확률 P(A|B) [최종 위치 추정 신뢰도]</span>
+              <div id="posterior-val" class="text-3xl md:text-4xl font-extrabold font-orbitron text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400">
+                80.0%
+              </div>
+              <p class="text-xs text-slate-400 mt-2">
+                센서 노이즈 속에서도 베이즈 정리를 통해 정밀하게 위치 확률이 보정됩니다.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 2: 후속 활동 동기 -->
+      <section id="sec-motive" class="hud-bracket hud-card p-6 md:p-8 rounded-2xl relative">
+        <div class="flex items-center gap-3 mb-6 border-b border-slate-800 pb-4">
+          <div class="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 text-xl">
+            <i class="fa-solid fa-bullseye"></i>
+          </div>
+          <div>
+            <span class="text-xs font-orbitron text-cyan-400 tracking-wider">SECTION 02</span>
+            <h2 class="text-2xl md:text-3xl font-extrabold font-noto text-white">후속 활동 동기</h2>
+          </div>
+        </div>
+
+        <!-- Exact Motive Text Box with High-Tech Quote Container -->
+        <div class="p-6 md:p-8 rounded-xl bg-gradient-to-br from-[#141E37]/90 to-slate-950/80 border border-cyan-500/30 relative">
+          <i class="fa-solid fa-quote-left text-3xl text-cyan-500/20 absolute top-4 left-4"></i>
+          <p class="text-slate-100 text-base md:text-lg leading-relaxed font-noto relative z-10 pl-4 border-l-2 border-cyan-400">
+            융합 활동을 할 때 자율주행차에 어떠한 수학적 원리가 사용되는지 궁금하여 베이즈 정리와 자율주행차에 대해 탐구를 진행했었습니다. 이후 실제 도로에서 돌발 상황이 발생했을 시, 어떤 식으로 베이즈 확률이 변화하는지 궁금증이 생겨 자율주행 센서 데이터 보정이 어떻게 일어나는지 탐구해보고자 했습니다.
+          </p>
+        </div>
+      </section>
+
+      <!-- SECTION 3: 관련 도서 및 관련 직종 -->
+      <section id="sec-books-career" class="hud-bracket hud-card p-6 md:p-8 rounded-2xl relative">
+        <div class="flex items-center gap-3 mb-6 border-b border-slate-800 pb-4">
+          <div class="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 text-xl">
+            <i class="fa-solid fa-book-bookmark"></i>
+          </div>
+          <div>
+            <span class="text-xs font-orbitron text-blue-400 tracking-wider">SECTION 03</span>
+            <h2 class="text-2xl md:text-3xl font-extrabold font-noto text-white">관련 도서 및 관련 직종</h2>
+          </div>
+        </div>
+
+        <!-- 3 Books Side-by-Side (Responsive Horizontal Grid) -->
+        <h3 class="text-lg font-bold font-orbitron text-slate-200 mb-4 flex items-center gap-2">
+          <i class="fa-solid fa-books text-cyan-400"></i> RECOMMENDED BOOKS
+        </h3>
+        
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+          
+          <!-- Book 1 -->
+          <div class="hud-card p-4 rounded-xl flex flex-col items-center text-center group">
+            <div class="w-full h-64 rounded-lg overflow-hidden bg-slate-950 flex items-center justify-center mb-4 border border-slate-800 group-hover:border-cyan-400 transition-colors">
+              <img 
+                src="https://image.yes24.com/goods/140998072/XL" 
+                alt="모든 것은 예측 가능하다" 
+                class="h-full w-auto object-contain hover:scale-105 transition-transform duration-300"
+                onerror="this.onerror=null; this.src='https://placehold.co/300x420/141E37/00FF9D?text=%EB%AA%A8%EB%93%A5+%EA%B2%83%EC%9D%80+%EC%98%88%EC%B8%A1+%EA%B0%80%EB%8A%A5%ED%95%98%EB%8B%A4';"
+              />
+            </div>
+            <h4 class="font-bold text-slate-100 text-base mb-1 font-noto">
+              &lt;모든 것은 예측 가능하다&gt;
+            </h4>
+            <p class="text-xs text-slate-400 font-orbitron">Bayesian Thinking & Real-World Prediction</p>
+          </div>
+
+          <!-- Book 2 -->
+          <div class="hud-card p-4 rounded-xl flex flex-col items-center text-center group">
+            <div class="w-full h-64 rounded-lg overflow-hidden bg-slate-950 flex items-center justify-center mb-4 border border-slate-800 group-hover:border-emerald-400 transition-colors">
+              <img 
+                src="https://image.yes24.com/goods/90406120/XL" 
+                alt="수학으로 풀어보는 칼만 필터 알고리즘" 
+                class="h-full w-auto object-contain hover:scale-105 transition-transform duration-300"
+                onerror="this.onerror=null; this.src='https://placehold.co/300x420/141E37/06B6D4?text=%EC%88%98%ED%95%99%EC%9C%BC%EB%A1%9C+%ED%95%B8%EB%9F%AC%EB%B3%B4%EB%8A%94+%EC%B5%9C%EB%A7%8C+%ED%95%84%ED%84%B0';"
+              />
+            </div>
+            <h4 class="font-bold text-slate-100 text-base mb-1 font-noto">
+              &lt;수학으로 풀어보는 칼만 필터 알고리즘&gt;
+            </h4>
+            <p class="text-xs text-slate-400 font-orbitron">Kalman Filter & State Estimation</p>
+          </div>
+
+          <!-- Book 3 -->
+          <div class="hud-card p-4 rounded-xl flex flex-col items-center text-center group">
+            <div class="w-full h-64 rounded-lg overflow-hidden bg-slate-950 flex items-center justify-center mb-4 border border-slate-800 group-hover:border-blue-400 transition-colors">
+              <img 
+                src="https://contents.kyobobook.co.kr/prvw/002/987/56/5800009298756/580320300340298756001.jpg" 
+                alt="확률론적 로보틱스" 
+                class="h-full w-auto object-contain hover:scale-105 transition-transform duration-300"
+                onerror="this.onerror=null; this.src='https://placehold.co/300x420/141E37/3B82F6?text=%ED%99%95%EB%A5%A0%EB%A1%A0%EC%A0%81+%EB%A1%9C%EB%B3%B4%ED%8B%B0%EC%8A%A4';"
+              />
+            </div>
+            <h4 class="font-bold text-slate-100 text-base mb-1 font-noto">
+              &lt;확률론적 로보틱스&gt;
+            </h4>
+            <p class="text-xs text-slate-400 font-orbitron">Probabilistic Robotics & SLAM</p>
+          </div>
+
+        </div>
+
+        <!-- Career Info Section -->
+        <div class="p-6 rounded-xl bg-[#141E37]/80 border border-slate-700/80">
+          <h3 class="text-lg font-bold text-slate-100 mb-4 flex items-center gap-2">
+            <i class="fa-solid fa-user-gear text-emerald-400"></i> 관련 진로 정보 및 탐구 사이트
+          </h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            <!-- Career Types -->
+            <div>
+              <h4 class="text-xs font-orbitron text-emerald-400 font-bold mb-2">TARGET CAREERS</h4>
+              <ul class="space-y-2 text-slate-300 text-sm">
+                <li class="flex items-center gap-2">
+                  <i class="fa-solid fa-chevron-right text-xs text-emerald-400"></i>
+                  자율주행 소프트웨어 엔지니어 (Autonomous SW Engineer)
+                </li>
+                <li class="flex items-center gap-2">
+                  <i class="fa-solid fa-chevron-right text-xs text-emerald-400"></i>
+                  로보틱스 연구원 (Robotics Researcher & SLAM Expert)
+                </li>
+                <li class="flex items-center gap-2">
+                  <i class="fa-solid fa-chevron-right text-xs text-emerald-400"></i>
+                  데이터 사이언티스트 (Data Scientist / Probabilistic Modeling)
+                </li>
+              </ul>
+            </div>
+
+            <!-- Career Exploration Links -->
+            <div>
+              <h4 class="text-xs font-orbitron text-cyan-400 font-bold mb-2">CAREER EXPLORATION LINKS</h4>
+              <div class="flex flex-wrap gap-3">
+                <a href="https://www.career.go.kr" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300 text-sm font-semibold transition-colors">
+                  <i class="fa-solid fa-[#06B6D4] fa-[#00FF9D] fa-up-right-from-square text-xs"></i> 커리어넷 방문하기
+                </a>
+                <a href="https://www.work.go.kr" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-emerald-300 text-sm font-semibold transition-colors">
+                  <i class="fa-solid fa-up-right-from-square text-xs"></i> 워크넷 방문하기
+                </a>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 4: 시뮬레이션 -->
+      <section id="sec-simulation" class="hud-bracket hud-card p-6 md:p-8 rounded-2xl relative">
+        <div class="flex items-center gap-3 mb-6 border-b border-slate-800 pb-4">
+          <div class="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 text-xl">
+            <i class="fa-solid fa-vr-cardboard"></i>
+          </div>
+          <div>
+            <span class="text-xs font-orbitron text-purple-400 tracking-wider">SECTION 04</span>
+            <h2 class="text-2xl md:text-3xl font-extrabold font-noto text-white">시뮬레이션</h2>
+          </div>
+        </div>
+
+        <!-- Introductory Text -->
+        <p class="text-slate-200 text-base md:text-lg mb-6 leading-relaxed font-noto">
+          후속 탐구를 하며 이해를 돕기 위해 만든 시뮬레이션입니다.
+        </p>
+
+        <!-- Detailed Tips Box -->
+        <div class="p-6 rounded-xl bg-slate-950/80 border border-purple-500/30 mb-8 space-y-4">
+          <div class="flex items-center gap-2 text-purple-400 font-orbitron font-bold text-sm">
+            <i class="fa-solid fa-circle-info"></i> SIMULATION GUIDE & PARAMETERS
+          </div>
+          <p class="text-slate-300 text-sm md:text-base leading-relaxed font-noto">
+            센서 노이즈 R은 측정 오차를 말합니다. 맑은 날에는 R이 작고, 폭우나 안개가 있을 때에는 R이 커집니다. 프로세스 노이즈 Q는 예측 오차를, 칼만 게인 K는 센서 신뢰도를 의미합니다. K는 0~1 사이의 값으로, 폭우가 오면 R이 커져서 K가 0에 가까워진다고 볼 수 있습니다. 추정 불확실성은 현재 필터가 추정하는 위치 분포의 분산, 즉, 오차범위를 말합니다. 해당 시뮬레이션은 예상 시나리오 6개로 이루어져 있으며, 시뮬레이션 좌측에 오차율을 보여주고 있습니다.
+          </p>
+        </div>
+
+        <!-- Prominent Action Button -->
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-4 py-4">
+          <a 
+            href="https://25-10423-lab.github.io/simul_auto_car/" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            class="group w-full sm:w-auto px-10 py-5 bg-gradient-to-r from-purple-600 via-pink-600 to-emerald-500 hover:from-purple-500 hover:to-emerald-400 text-white font-orbitron font-extrabold text-lg rounded-xl shadow-[0_0_30px_rgba(168,85,247,0.4)] hover:shadow-[0_0_50px_rgba(168,85,247,0.7)] transition-all transform hover:-translate-y-1 text-center flex items-center justify-center gap-3"
+          >
+            <i class="fa-solid fa-play text-xl group-hover:scale-125 transition-transform"></i>
+            <span>시뮬레이션 바로가기</span>
+            <i class="fa-solid fa-arrow-up-right-from-square text-sm"></i>
+          </a>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="mt-16 border-t border-slate-800 bg-[#0A0F1D] py-8 px-4 text-center text-xs text-slate-500 font-orbitron">
+      <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div>
+          AUTONOMOUS BAYESIAN HUD SYSTEM &copy; 2026 | HIGH-TECH ACADEMIC RESEARCH
+        </div>
+        <div class="flex items-center gap-4 text-slate-400">
+          <span>STATUS: ALL SYSTEMS NOMINAL</span>
+          <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- VS CODE LIVE SERVER & QR CODE GUIDE MODAL -->
+  <div id="vscode-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="hud-card p-6 md:p-8 rounded-2xl max-w-lg w-full relative border-cyan-500/50 shadow-cyan-glow">
+      <!-- Close Button -->
+      <button onclick="closeModal('vscode-modal')" class="absolute top-4 right-4 text-slate-400 hover:text-white text-xl">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+
+      <div class="flex items-center gap-3 mb-4 border-b border-slate-800 pb-3">
+        <i class="fa-solid fa-qrcode text-2xl text-cyan-400"></i>
+        <h3 class="font-orbitron font-bold text-lg text-white">VS Code Live Server & QR Guide</h3>
+      </div>
+
+      <div class="space-y-4 text-slate-300 text-sm">
+        <div class="p-4 rounded-lg bg-slate-950 border border-slate-800">
+          <h4 class="font-bold text-cyan-300 mb-1 flex items-center gap-2">
+            <i class="fa-solid fa-laptop-code"></i> Live Server 실행 방법
+          </h4>
+          <ol class="list-decimal list-inside space-y-1 text-xs text-slate-400">
+            <li>Visual Studio Code에서 본 <code class="text-emerald-400">index.html</code> 파일 열기</li>
+            <li>확장 탭에서 <strong>Live Server</strong> 설치</li>
+            <li>우측 하단 <strong>Go Live</strong> 클릭 또는 <code class="text-emerald-400">Alt + L, Alt + O</code></li>
+          </ol>
+        </div>
+
+        <div class="p-4 rounded-lg bg-slate-950 border border-slate-800 flex flex-col items-center text-center">
+          <h4 class="font-bold text-emerald-300 mb-2 flex items-center gap-2">
+            <i class="fa-solid fa-mobile-screen-button"></i> 스마트폰(모바일) 접속 QR 가이드
+          </h4>
+          <p class="text-xs text-slate-400 mb-3">
+            동일한 Wi-Fi 연결 후 PC의 IP 주소(예: <code class="text-cyan-400">http://192.168.x.x:5500</code>)로 모바일 접속이 가능합니다.
+          </p>
+          <!-- Live Generated QR Placeholder -->
+          <div class="p-2 bg-white rounded-lg mb-2">
+            <img 
+              src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=https://25-10423-lab.github.io/simul_auto_car/" 
+              alt="Simulation QR Code" 
+              class="w-32 h-32"
+            />
+          </div>
+          <span class="text-[11px] font-orbitron text-slate-400">[SIMULATION WEB QR CODE]</span>
+        </div>
+      </div>
+
+      <button onclick="closeModal('vscode-modal')" class="w-full mt-6 py-2.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 font-orbitron text-sm font-semibold transition-colors">
+        CLOSE WINDOW
+      </button>
+    </div>
+  </div>
+
+  <!-- JAVASCRIPT LOGIC -->
+  <script>
+    // Intro overlay dismissal
+    function enterDashboard() {
+      const intro = document.getElementById('intro-screen');
+      intro.classList.add('opacity-0', 'pointer-events-none');
+      setTimeout(() => {
+        intro.style.display = 'none';
+      }, 700);
+    }
+
+    // Modal Control
+    function openModal(id) {
+      const modal = document.getElementById(id);
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeModal(id) {
+      const modal = document.getElementById(id);
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    // Interactive Bayes Probability Widget Calculation
+    function updateBayesWidget() {
+      const prior = parseFloat(document.getElementById('prior-range').value) / 100;
+      const sensor = parseFloat(document.getElementById('sensor-range').value) / 100;
+
+      document.getElementById('prior-val').innerText = Math.round(prior * 100) + '%';
+      document.getElementById('sensor-val').innerText = Math.round(sensor * 100) + '%';
+
+      // Simple Bayes calculation P(A|B) = (P(B|A)*P(A)) / [P(B|A)*P(A) + P(B|~A)*P(~A)]
+      // Assuming false positive rate = 1 - sensor accuracy
+      const falsePositive = 1 - sensor;
+      const numerator = sensor * prior;
+      const denominator = numerator + (falsePositive * (1 - prior));
+      
+      const posterior = denominator === 0 ? 0 : (numerator / denominator) * 100;
+      document.getElementById('posterior-val').innerText = posterior.toFixed(1) + '%';
+    }
+
+    // LiDAR Radar Canvas Telemetry Visualizer Animation
+    window.onload = function() {
+      updateBayesWidget();
+
+      const canvas = document.getElementById('hud-radar-canvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+
+      function resizeCanvas() {
+        canvas.width = canvas.parentElement.clientWidth;
+        canvas.height = canvas.parentElement.clientHeight;
+      }
+      resizeCanvas();
+      window.addEventListener('resize', resizeCanvas);
+
+      let angle = 0;
+      const points = [
+        { r: 0.35, a: 0.4 },
+        { r: 0.65, a: 1.8 },
+        { r: 0.50, a: 3.5 },
+        { r: 0.75, a: 5.1 }
+      ];
+
+      function animateRadar() {
+        const w = canvas.width;
+        const h = canvas.height;
+        const cx = w / 2;
+        const cy = h / 2;
+        const maxR = Math.min(w, h) * 0.42;
+
+        ctx.clearRect(0, 0, w, h);
+
+        // Concentric radar circles
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.2)';
+        ctx.lineWidth = 1;
+        for (let i = 1; i <= 3; i++) {
+          ctx.beginPath();
+          ctx.arc(cx, cy, (maxR / 3) * i, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        // Radar crosshairs
+        ctx.beginPath();
+        ctx.moveTo(cx - maxR, cy);
+        ctx.lineTo(cx + maxR, cy);
+        ctx.moveTo(cx, cy - maxR);
+        ctx.lineTo(cx, cy + maxR);
+        ctx.stroke();
+
+        // Sweeping Sector
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, maxR, angle, angle + 0.4);
+        ctx.closePath();
+        const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
+        gradient.addColorStop(0, 'rgba(0, 255, 157, 0.05)');
+        gradient.addColorStop(1, 'rgba(0, 255, 157, 0.3)');
+        ctx.fillStyle = gradient;
+        ctx.fill();
+        ctx.restore();
+
+        // Target Points
+        points.forEach(pt => {
+          const px = cx + Math.cos(pt.a) * (maxR * pt.r);
+          const py = cy + Math.sin(pt.a) * (maxR * pt.r);
+          
+          ctx.fillStyle = '#00FF9D';
+          ctx.beginPath();
+          ctx.arc(px, py, 4, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = 'rgba(0, 255, 157, 0.4)';
+          ctx.beginPath();
+          ctx.arc(px, py, 8, 0, Math.PI * 2);
+          ctx.stroke();
+        });
+
+        // Center autonomous car dot
+        ctx.fillStyle = '#06B6D4';
+        ctx.beginPath();
+        ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        angle += 0.03;
+        requestAnimationFrame(animateRadar);
+      }
+
+      animateRadar();
+    };
+  </script>
+</body>
+</html>
